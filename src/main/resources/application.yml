@@ -1,0 +1,70 @@
+server:
+  port: 8087
+
+spring:
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3305/excel_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&useServerPrepStmts=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048
+    username: root
+    password: root
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 15
+      connection-timeout: 60000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+    # 启用数据库连接验证以确保连接有效性
+    test-on-borrow: true
+    test-while-idle: true
+    validation-query: SELECT 1
+
+  # 异步处理配置
+  task:
+    execution:
+      pool:
+        core-size: 10
+        max-size: 30
+        queue-capacity: 1000
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-executor-type: BATCH
+    jdbc-type-for-null: NULL
+#    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  mapper-locations: classpath:mapper/*.xml
+  global-config:
+    banner: false
+    db-config:
+      id-type: AUTO
+      update-strategy: NOT_NULL
+      insert-strategy: NOT_NULL
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 导出配置
+excel:
+  # Apache POI配置
+  poi:
+    batch-size: 5000
+    thread-count: 8
+  # EasyExcel配置
+  easyexcel:
+    batch-size: 5000
+    thread-count: 8
+  # CSV配置
+  csv:
+    batch-size: 5000
+    thread-count: 8
+    compression-enabled: true
+    buffer-size: 8192
+  common:
+    concurrent-save-enabled: true
+    max-concurrent-saves: 6
+    async-executor-prefix: excel-task-
+    max-queue-size: 10000
