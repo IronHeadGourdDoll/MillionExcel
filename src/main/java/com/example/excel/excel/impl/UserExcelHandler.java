@@ -35,15 +35,43 @@ public class UserExcelHandler implements ExcelHandler<User> {
         long startTime = System.currentTimeMillis();
         
         try {
-            // 设置响应头
-            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition", 
-                "attachment; filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8.toString()));
+            // 确保文件名以.xlsx结尾，避免格式混淆
+            if (!filename.toLowerCase().endsWith(".xlsx")) {
+                filename = filename + ".xlsx";
+            }
             
-            // 使用EasyExcel写入数据
-            EasyExcel.write(response.getOutputStream(), clazz)
-                    .sheet("用户数据")
-                    .doWrite(dataList);
+            // 设置响应头 - 使用更通用的MIME类型以提高兼容性
+            response.setContentType("application/vnd.ms-excel");
+            response.setCharacterEncoding("UTF-8");
+            // 正确处理文件名，避免中文乱码
+            String encodedFileName = URLEncoder.encode(filename, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%");
+            response.setHeader("Content-disposition", "attachment;filename*=UTF-8''" + encodedFileName);
+            // 确保响应头不会被缓存
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setHeader("Expires", "0");
+            // 防止浏览器嗅探内容类型
+            response.setHeader("X-Content-Type-Options", "nosniff");
+            // 添加浏览器兼容性头部
+            response.setHeader("Accept-Ranges", "bytes");
+
+            // 创建ExcelWriterBuilder，设置更多兼容性配置
+            com.alibaba.excel.write.builder.ExcelWriterBuilder writerBuilder = EasyExcel.write(response.getOutputStream(), clazz);
+            
+            // 添加日期转换器，确保日期格式在Excel中正确显示
+            writerBuilder.registerConverter(new com.alibaba.excel.converters.string.StringStringConverter());
+            
+            // 不自动关闭输出流，由Spring管理
+            writerBuilder.autoCloseStream(false);
+            
+            // 创建写入配置，添加更多兼容性选项
+            com.alibaba.excel.write.builder.ExcelWriterSheetBuilder sheetBuilder = writerBuilder.sheet("用户数据");
+            
+            // 写入数据
+            sheetBuilder.doWrite(dataList);
+
+            // 确保响应完全刷新
+            response.flushBuffer();
             
             long endTime = System.currentTimeMillis();
             log.info("EasyExcel导出完成，共导出{}条数据，耗时{}ms", dataList.size(), (endTime - startTime));
@@ -55,9 +83,49 @@ public class UserExcelHandler implements ExcelHandler<User> {
 
     @Override
     public Future<Boolean> asyncExport(List<User> dataList, HttpServletResponse response, String filename, Class<User> clazz) {
+        // 创建一个新的final变量，确保可以在lambda表达式中使用
+        final String exportFilename;
+        // 确保文件名以.xlsx结尾，避免格式混淆
+        if (filename.toLowerCase().endsWith(".xlsx")) {
+            exportFilename = filename;
+        } else {
+            exportFilename = filename + ".xlsx";
+        }
+        
         return CompletableFuture.supplyAsync(() -> {
             try {
-                this.export(dataList, response, filename, clazz);
+                // 设置响应头 - 使用更通用的MIME类型以提高兼容性
+                response.setContentType("application/vnd.ms-excel");
+                response.setCharacterEncoding("UTF-8");
+                // 正确处理文件名，避免中文乱码
+                String encodedFileName = URLEncoder.encode(exportFilename, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%");
+                response.setHeader("Content-disposition", "attachment;filename*=UTF-8''" + encodedFileName);
+                // 确保响应头不会被缓存
+                response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+                response.setHeader("Pragma", "no-cache");
+                response.setHeader("Expires", "0");
+                // 防止浏览器嗅探内容类型
+                response.setHeader("X-Content-Type-Options", "nosniff");
+                // 添加浏览器兼容性头部
+                response.setHeader("Accept-Ranges", "bytes");
+
+                // 创建ExcelWriterBuilder，设置更多兼容性配置
+                com.alibaba.excel.write.builder.ExcelWriterBuilder writerBuilder = EasyExcel.write(response.getOutputStream(), clazz);
+                
+                // 添加日期转换器，确保日期格式在Excel中正确显示
+                writerBuilder.registerConverter(new com.alibaba.excel.converters.string.StringStringConverter());
+                
+                // 不自动关闭输出流，由Spring管理
+                writerBuilder.autoCloseStream(false);
+                
+                // 创建写入配置，添加更多兼容性选项
+                com.alibaba.excel.write.builder.ExcelWriterSheetBuilder sheetBuilder = writerBuilder.sheet("用户数据");
+                
+                // 写入数据
+                sheetBuilder.doWrite(dataList);
+
+                // 确保响应完全刷新
+                response.flushBuffer();
                 return true;
             } catch (Exception e) {
                 log.error("异步导出Excel失败", e);

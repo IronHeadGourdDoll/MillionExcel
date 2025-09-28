@@ -100,37 +100,45 @@ const sendRequest = async (method, url, dataOrConfig = {}) => {
     }
   }
 
+// 导出功能 - 统一的导出函数
+const exportData = async (type) => {
+  try {
+    let url = '/export';
+    let fileName = `export-${type}-${Date.now()}`;
+    
+    // 根据类型设置URL和文件名后缀
+    if (type === 'poi') {
+      url = '/export/apache-poi';
+      fileName += '.xlsx';
+    } else if (type === 'easyexcel') {
+      url = '/export/easy-excel';
+      fileName += '.xlsx';
+    } else if (type === 'csv') {
+      url = '/export/csv';
+      fileName += '.csv';
+    }
+    
+    const response = await sendRequest('get', url);
+    downloadFile(response, fileName);
+    resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出成功`;
+  } catch (error) {
+    resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出失败: ${error.message}`;
+  }
+}
+
 // 导出功能 - Apache POI
 const exportWithApachePOI = async () => {
-  try {
-    const response = await sendRequest('get', '/export/apache-poi')
-    downloadFile(response, `apache-poi-export-${Date.now()}.xlsx`)
-    resultMessage.value = 'Apache POI导出成功'
-  } catch (error) {
-    resultMessage.value = `Apache POI导出失败: ${error.message}`
-  }
+  await exportData('poi');
 }
 
 // 导出功能 - EasyExcel
 const exportWithEasyExcel = async () => {
-  try {
-    const response = await sendRequest('get', '/export/easy-excel')
-    downloadFile(response, `easy-excel-export-${Date.now()}.xlsx`)
-    resultMessage.value = 'EasyExcel导出成功'
-  } catch (error) {
-    resultMessage.value = `EasyExcel导出失败: ${error.message}`
-  }
+  await exportData('easyexcel');
 }
 
 // 导出功能 - CSV
 const exportWithCSV = async () => {
-  try {
-    const response = await sendRequest('get', '/export/csv')
-    downloadFile(response, `csv-export-${Date.now()}.csv`)
-    resultMessage.value = 'CSV导出成功'
-  } catch (error) {
-    resultMessage.value = `CSV导出失败: ${error.message}`
-  }
+  await exportData('csv');
 }
 
 // 异步导出功能
@@ -145,17 +153,16 @@ const asyncExport = async () => {
 
 // 下载文件的辅助函数
 const downloadFile = (response, filename) => {
-  const blob = new Blob([response.data], {
-    type: response.headers['content-type']
-  })
-  const url = window.URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  window.URL.revokeObjectURL(url)
+  const blob = new Blob([response.data], {type: '.xlsx'})
+  let url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  let downloadName = '结果'
+          a.setAttribute('download', `${downloadName}.xlsx`);
+          document.body.appendChild(a);
+          a.click();
+          url = window.URL.revokeObjectURL(url);
+          document.body.removeChild(a)
 }
 
 // 清空响应时间记录

@@ -112,28 +112,38 @@ public class CsvExcelHandler<T> implements ExcelHandler<T> {
             // 创建CSV打印机
             try (OutputStream outputStream = compressionEnabled ? 
                     new GZIPOutputStream(response.getOutputStream()) : response.getOutputStream();
-                 Writer writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8);
-                 CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+                 Writer writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
                 
-                // 写入数据
-                for (int i = 0; i < dataList.size(); i++) {
-                    if (i > 0 && i % 10000 == 0) {
-                        log.info("已处理{}条数据", i);
-                    }
-                    
-                    T data = dataList.get(i);
-                    List<String> record = new ArrayList<>();
-                    
-                    for (Field field : fields) {
-                        field.setAccessible(true);
-                        Object value = field.get(data);
-                        record.add(value != null ? value.toString() : "");
-                    }
-                    
-                    csvPrinter.printRecord(record);
+                // 写入UTF-8 BOM标记，解决Excel打开CSV文件乱码问题
+                if (!compressionEnabled) {
+                    outputStream.write(0xEF);
+                    outputStream.write(0xBB);
+                    outputStream.write(0xBF);
                 }
                 
-                csvPrinter.flush();
+                // 创建CSV打印机
+                try (CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers))) {
+                    
+                    // 写入数据
+                    for (int i = 0; i < dataList.size(); i++) {
+                        if (i > 0 && i % 10000 == 0) {
+                            log.info("已处理{}条数据", i);
+                        }
+                        
+                        T data = dataList.get(i);
+                        List<String> record = new ArrayList<>();
+                        
+                        for (Field field : fields) {
+                            field.setAccessible(true);
+                            Object value = field.get(data);
+                            record.add(value != null ? value.toString() : "");
+                        }
+                        
+                        csvPrinter.printRecord(record);
+                    }
+                    
+                    csvPrinter.flush();
+                }
             }
             
             long endTime = System.currentTimeMillis();

@@ -20,7 +20,7 @@ public class SimpleExcelHandler<T> implements ExcelHandler<T> {
     @Override
     public void export(List<T> dataList, HttpServletResponse response, String filename, Class<T> clazz) {
         try {
-            response.setContentType("application/vnd.ms-excel");
+            // response.setContentType("application/vnd.ms-excel");
             response.setHeader("Content-Disposition", "attachment; filename=" + filename);
             response.getWriter().write("测试Excel数据");
         } catch (Exception e) {

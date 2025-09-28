@@ -11,10 +11,12 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,28 +42,87 @@ public class ExcelController {
     private UserExcelHandler userExcelHandler;
 
     /**
-     * 导出数据到Excel
+     * 导出数据到Excel - 统一接口
      *
      * @param type     导出类型：poi, easyexcel, csv
      * @param response HTTP响应
      */
-    @GetMapping("/export")
-    public void exportExcel(@RequestParam(value = "type", defaultValue = "easyexcel") String type,
-                            HttpServletResponse response) {
+    @GetMapping({
+        "/export",
+        "/export/apache-poi",
+        "/export/easy-excel",
+        "/export/csv"
+    })
+    public void exportExcel(@RequestParam(value = "type", required = false) String type,
+                            HttpServletResponse response,
+                            HttpServletRequest request) {
         long startTime = System.currentTimeMillis();
 
         try {
-            // 注意：由于移除了UserService依赖，创建模拟数据用于测试
-            List<User> mockUsers = createMockUsers(10);
+            // 根据路径确定导出类型，如果参数中没有提供
+            if (type == null) {
+                // 获取请求路径
+                String requestUri = request.getRequestURI();
+                if (requestUri.contains("/apache-poi")) {
+                    type = "poi";
+                } else if (requestUri.contains("/easy-excel")) {
+                    type = "easyexcel";
+                } else if (requestUri.contains("/csv")) {
+                    type = "csv";
+                } else {
+                    // 默认使用easyexcel
+                    type = "easyexcel";
+                }
+            }
+
+            // 创建模拟数据用于测试 - 增加数据量到1000条
+            List<User> mockUsers = createMockUsers(1000);
 
             // 获取对应的Excel处理器
             ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
 
+            // 根据类型设置文件名后缀和内容类型
+            String fileExtension = "xlsx";
+            String contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            
+            if ("csv".equals(type)) {
+                fileExtension = "csv";
+                contentType = "text/csv; charset=UTF-8";
+            } else if ("poi".equals(type)) {
+                // Apache POI默认生成xlsx格式
+                fileExtension = "xlsx";
+                contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            } else if ("easyexcel".equals(type)) {
+                // EasyExcel生成xlsx格式
+                fileExtension = "xlsx";
+                contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            }
+
+            // 设置响应头
+            // response.setContentType(contentType);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
+            // 确保响应头不会被缓存
+            // response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            // response.setHeader("Pragma", "no-cache");
+            // response.setHeader("Expires", "0");
+            // // 防止浏览器嗅探内容类型
+            // response.setHeader("X-Content-Type-Options", "nosniff");
+
+            // 生成文件名（包含时间戳，避免缓存）
+            String fileName = "用户数据_" + type + "_" + System.currentTimeMillis() + "." + fileExtension;
+            
             // 执行导出
-            excelHandler.export(mockUsers, response, "用户数据" + System.currentTimeMillis() + ".xlsx", User.class);
+            try {
+                excelHandler.export(mockUsers, response, fileName, User.class);
+                // 确保响应完全刷新
+                response.flushBuffer();
+            } catch (Exception e) {
+                log.error("导出执行失败", e);
+                throw e;
+            }
 
             long endTime = System.currentTimeMillis();
-            log.info("导出完成，耗时{}ms", (endTime - startTime));
+            log.info("{}导出完成，耗时{}ms", type.toUpperCase(), (endTime - startTime));
         } catch (Exception e) {
             log.error("导出Excel失败", e);
             try {
@@ -85,8 +146,25 @@ public class ExcelController {
             // 注意：由于移除了UserService依赖，创建模拟数据用于测试
             List<User> mockUsers = createMockUsers(10);
 
+            // 根据类型设置文件名后缀和内容类型
+            String fileExtension = "xlsx";
+            String contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            
+            if ("csv".equals(type)) {
+                fileExtension = "csv";
+                contentType = "text/csv; charset=UTF-8";
+            }
+            
+            // 设置响应头
+            response.setContentType(contentType);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
+            // 确保响应头不会被缓存
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setHeader("Expires", "0");
+
             // 执行异步导出
-            Future<Boolean> future = userExcelHandler.asyncExport(mockUsers, response, "用户数据" + System.currentTimeMillis() + ".xlsx", User.class);
+            Future<Boolean> future = userExcelHandler.asyncExport(mockUsers, response, "用户数据_异步_" + System.currentTimeMillis() + "." + fileExtension, User.class);
 
             // 轮询等待完成（在实际生产环境中，可能需要返回任务ID，让客户端轮询任务状态）
             CompletableFuture.supplyAsync(() -> {
