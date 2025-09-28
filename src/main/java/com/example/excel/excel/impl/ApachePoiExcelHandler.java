@@ -107,41 +107,68 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
         long startTime = System.currentTimeMillis();
 
         // 使用SXSSFWorkbook来处理大数据量，避免内存溢出
-        try (SXSSFWorkbook workbook = new SXSSFWorkbook(100);
-             OutputStream outputStream = response.getOutputStream()) {
-
-            // 设置响应头
+        SXSSFWorkbook workbook = null;
+        
+        try {
+            // 设置响应头，确保与Excel 2021 LTSC兼容
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition",
-                    "attachment; filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8.toString()));
+            response.setCharacterEncoding("UTF-8");
+            // 正确处理文件名，避免中文乱码
+            String encodedFileName = URLEncoder.encode(filename, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%");
+            response.setHeader("Content-disposition", "attachment;filename*=UTF-8''" + encodedFileName);
+            // 确保响应头不会被缓存
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setHeader("Expires", "0");
+            // 防止浏览器嗅探内容类型
+            response.setHeader("X-Content-Type-Options", "nosniff");
 
-            // 创建工作表
+            // 创建工作簿和工作表
+            workbook = new SXSSFWorkbook(100);
             Sheet sheet = workbook.createSheet("Sheet1");
 
             // 创建表头
             createHeaderRow(sheet, clazz);
 
-            // 分批写入数据
+            // 分批处理数据，避免大数据量时的内存问题
+            int batchSize = 1000;
+            int startIndex = 0;
             int rowIndex = 1;
-            for (int i = 0; i < dataList.size(); i++) {
-                if (i > 0 && i % 1000 == 0) {
-                    log.info("已处理{}条数据", i);
+            
+            while (startIndex < dataList.size()) {
+                int endIndex = Math.min(startIndex + batchSize, dataList.size());
+                
+                for (int i = startIndex; i < endIndex; i++) {
+                    if (i > 0 && i % 1000 == 0) {
+                        log.info("已处理{}条数据", i);
+                    }
+                    
+                    T data = dataList.get(i);
+                    Row row = sheet.createRow(rowIndex++);
+                    fillRow(row, data, clazz);
                 }
                 
-                T data = dataList.get(i);
-                Row row = sheet.createRow(rowIndex++);
-                fillRow(row, data, clazz);
+                startIndex = endIndex;
             }
 
             // 写入响应
+            OutputStream outputStream = response.getOutputStream();
             workbook.write(outputStream);
-            workbook.dispose(); // 释放临时文件
+            outputStream.flush();
+            
+            // 确保响应完全刷新
+            response.flushBuffer();
 
             long endTime = System.currentTimeMillis();
             log.info("POI导出完成，共导出{}条数据，耗时{}ms", dataList.size(), (endTime - startTime));
         } catch (Exception e) {
             log.error("POI导出Excel失败", e);
             throw new RuntimeException("导出Excel失败", e);
+        } finally {
+            // 关闭资源
+            if (workbook != null) {
+                workbook.dispose();
+            }
         }
     }
 
