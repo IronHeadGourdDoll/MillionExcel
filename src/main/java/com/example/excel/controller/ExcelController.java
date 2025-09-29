@@ -84,7 +84,7 @@ public class ExcelController {
             // 根据类型设置文件名后缀和内容类型
             String fileExtension = "xlsx";
             String contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-            
+
             if ("csv".equals(type)) {
                 fileExtension = "csv";
                 contentType = "text/csv; charset=UTF-8";
@@ -110,7 +110,7 @@ public class ExcelController {
 
             // 生成文件名（包含时间戳，避免缓存）
             String fileName = "用户数据_" + type + "_" + System.currentTimeMillis() + "." + fileExtension;
-            
+
             // 执行导出
             try {
                 excelHandler.export(mockUsers, response, fileName, User.class);
@@ -149,12 +149,12 @@ public class ExcelController {
             // 根据类型设置文件名后缀和内容类型
             String fileExtension = "xlsx";
             String contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-            
+
             if ("csv".equals(type)) {
                 fileExtension = "csv";
                 contentType = "text/csv; charset=UTF-8";
             }
-            
+
             // 设置响应头
             response.setContentType(contentType);
             response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
