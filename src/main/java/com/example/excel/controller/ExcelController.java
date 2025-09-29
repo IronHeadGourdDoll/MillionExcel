@@ -3,7 +3,6 @@ package com.example.excel.controller;
 import com.example.excel.entity.User;
 import com.example.excel.excel.ExcelHandler;
 import com.example.excel.excel.ExcelHandlerFactory;
-import com.example.excel.excel.impl.UserExcelHandler;
 import com.example.excel.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,8 +20,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 
 /**
  * Excel导入导出控制器，提供REST API接口
@@ -37,9 +34,6 @@ public class ExcelController {
 
     @Autowired
     private UserService userService;
-
-    @Autowired
-    private UserExcelHandler userExcelHandler;
 
     /**
      * 导出数据到Excel - 统一接口
@@ -75,8 +69,8 @@ public class ExcelController {
                 }
             }
 
-            // 创建模拟数据用于测试 - 增加数据量到1000条
-            List<User> mockUsers = createMockUsers(1000);
+            // 获取用户数据
+            List<User> users = userService.selectPage(1, 1000); // 使用selectPage方法替代list方法
 
             // 获取对应的Excel处理器
             ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
@@ -87,7 +81,7 @@ public class ExcelController {
 
             if ("csv".equals(type)) {
                 fileExtension = "csv";
-                contentType = "text/csv; charset=UTF-8";
+                contentType = "text/csv;charset=UTF-8";
             } else if ("poi".equals(type)) {
                 // Apache POI默认生成xlsx格式
                 fileExtension = "xlsx";
@@ -99,28 +93,21 @@ public class ExcelController {
             }
 
             // 设置响应头
-            // response.setContentType(contentType);
+            response.setContentType(contentType);
             response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
             // 确保响应头不会被缓存
-            // response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-            // response.setHeader("Pragma", "no-cache");
-            // response.setHeader("Expires", "0");
-            // // 防止浏览器嗅探内容类型
-            // response.setHeader("X-Content-Type-Options", "nosniff");
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setHeader("Expires", "0");
+            // 防止浏览器嗅探内容类型
+            response.setHeader("X-Content-Type-Options", "nosniff");
 
             // 生成文件名（包含时间戳，避免缓存）
             String fileName = "用户数据_" + type + "_" + System.currentTimeMillis() + "." + fileExtension;
 
             // 执行导出
-            try {
-                excelHandler.export(mockUsers, response, fileName, User.class);
-                // 确保响应完全刷新
-                response.flushBuffer();
-            } catch (Exception e) {
-                log.error("导出执行失败", e);
-                throw e;
-            }
-
+            excelHandler.export(users, response, fileName, User.class);
+            
             long endTime = System.currentTimeMillis();
             log.info("{}导出完成，耗时{}ms", type.toUpperCase(), (endTime - startTime));
         } catch (Exception e) {
@@ -143,8 +130,11 @@ public class ExcelController {
     public void asyncExportExcel(@RequestParam(value = "type", defaultValue = "easyexcel") String type,
                                  HttpServletResponse response) {
         try {
-            // 注意：由于移除了UserService依赖，创建模拟数据用于测试
-            List<User> mockUsers = createMockUsers(10);
+            // 获取用户数据
+            List<User> users = userService.selectPage(1, 1000); // 使用selectPage方法替代list方法
+
+            // 获取Excel处理器
+            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
 
             // 根据类型设置文件名后缀和内容类型
             String fileExtension = "xlsx";
@@ -158,29 +148,21 @@ public class ExcelController {
             // 设置响应头
             response.setContentType(contentType);
             response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
-            // 确保响应头不会被缓存
             response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
             response.setHeader("Pragma", "no-cache");
             response.setHeader("Expires", "0");
 
+            final String s = fileExtension;
             // 执行异步导出
-            Future<Boolean> future = userExcelHandler.asyncExport(mockUsers, response, "用户数据_异步_" + System.currentTimeMillis() + "." + fileExtension, User.class);
-
-            // 轮询等待完成（在实际生产环境中，可能需要返回任务ID，让客户端轮询任务状态）
-            CompletableFuture.supplyAsync(() -> {
+            CompletableFuture.runAsync(() -> {
                 try {
-                    return future.get();
-                } catch (InterruptedException | ExecutionException e) {
-                    log.error("异步导出Excel异常", e);
-                    return false;
-                }
-            }).thenAccept(result -> {
-                if (result) {
-                    log.info("异步导出Excel成功");
-                } else {
-                    log.error("异步导出Excel失败");
+                    excelHandler.export(users, response, "用户数据_异步_" + System.currentTimeMillis() + "." + s, User.class);
+                } catch (Exception e) {
+                    log.error("异步导出Excel执行失败", e);
                 }
             });
+            
+            log.info("异步导出Excel任务已提交");
         } catch (Exception e) {
             log.error("异步导出Excel失败", e);
             try {
@@ -241,27 +223,11 @@ public class ExcelController {
                 return "上传的文件为空";
             }
 
-            // 执行异步导入
-            Future<List<User>> future = userExcelHandler.asyncImportExcel(file, User.class);
+            // 获取对应的Excel处理器
+            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
 
-            // 异步处理导入结果
-            CompletableFuture.supplyAsync(() -> {
-                try {
-                    return future.get();
-                } catch (InterruptedException | ExecutionException e) {
-                    log.error("异步导入Excel异常", e);
-                    return null;
-                }
-            }).thenAccept(users -> {
-                if (users != null && !users.isEmpty()) {
-                    try {
-                        userService.batchSave(users);
-                        log.info("异步导入解析完成，共解析并保存{}条数据", users.size());
-                    } catch (ExecutionException | InterruptedException e) {
-                        log.error("异步保存用户数据异常", e);
-                    }
-                }
-            });
+            // 执行异步导入
+            excelHandler.asyncImportExcel(file, User.class);
 
             return "异步导入任务已提交，请稍后查看结果";
         } catch (Exception e) {
@@ -282,8 +248,26 @@ public class ExcelController {
                              @RequestParam(value = "pageSize", defaultValue = "10000") int pageSize,
                              HttpServletResponse response) {
         try {
-            // 执行分页导出
-            userExcelHandler.exportByPage(1, pageSize, response, "用户数据分页导出" + System.currentTimeMillis() + ".xlsx", User.class);
+            // 获取Excel处理器
+            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
+            
+            // 获取第一页数据
+            List<User> users = userService.selectPage(1, pageSize);
+            
+            // 设置响应头
+            String fileExtension = "csv".equals(type) ? "csv" : "xlsx";
+            String contentType = "csv".equals(type) ? "text/csv;charset=UTF-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            
+            response.setContentType(contentType);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setHeader("Expires", "0");
+            
+            // 执行导出
+            excelHandler.export(users, response, "用户数据分页导出" + System.currentTimeMillis() + "." + fileExtension, User.class);
+            
+            log.info("分页导出完成，页码：1，每页大小：{}", pageSize);
         } catch (Exception e) {
             log.error("分页导出Excel失败", e);
             try {
@@ -292,29 +276,6 @@ public class ExcelController {
                 log.error("写入响应失败", ioException);
             }
         }
-    }
-
-    /**
-     * 生成测试数据 - 注意：当前已禁用（无数据库连接）
-     *
-     * @param count 数据量
-     * @return 生成结果
-     */
-    @GetMapping("/generate-test-data")
-    public String generateTestData(@RequestParam(value = "count", defaultValue = "100000") int count) {
-        log.warn("生成测试数据：功能已禁用（数据库服务未连接）");
-        return "生成测试数据功能暂时不可用（数据库服务未连接）";
-    }
-
-    /**
-     * 清空测试数据 - 注意：当前已禁用（无数据库连接）
-     *
-     * @return 清空结果
-     */
-    @GetMapping("/clear-test-data")
-    public String clearTestData() {
-        log.warn("清空测试数据：功能已禁用（数据库服务未连接）");
-        return "清空测试数据功能暂时不可用（数据库服务未连接）";
     }
 
     /**
@@ -340,32 +301,6 @@ public class ExcelController {
             }
         } catch (Exception e) {
             log.error("下载模板失败", e);
-        }
-    }
-
-    /**
-     * 下载修复后的导入模板（无#注释符号，正确的UTF-8编码）
-     */
-    @GetMapping("/corrected-template")
-    public void downloadCorrectedTemplate(HttpServletResponse response) {
-        try {
-            // 设置响应头
-            response.setContentType("text/csv");
-            response.setHeader("Content-Disposition", "attachment; filename=user_import_template_corrected.csv");
-
-            // 读取修复后的模板文件
-            ClassPathResource resource = new ClassPathResource("templates/user_import_template_corrected.csv");
-            try (InputStream inputStream = resource.getInputStream();
-                 OutputStream outputStream = response.getOutputStream()) {
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-                while ((bytesRead = inputStream.read(buffer)) != -1) {
-                    outputStream.write(buffer, 0, bytesRead);
-                }
-                outputStream.flush();
-            }
-        } catch (Exception e) {
-            log.error("下载修复后模板失败", e);
         }
     }
 

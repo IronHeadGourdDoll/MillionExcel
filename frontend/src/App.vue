@@ -13,7 +13,9 @@ const importType = ref('easyexcel') // 默认为easyexcel
 const apiClient = axios.create({
   baseURL: 'http://localhost:8087/api/excel',
   timeout: 300000, // 5分钟超时
-  withCredentials: true})
+  withCredentials: true,
+  responseType: 'blob' // 重要：设置响应类型为blob，以便正确处理文件下载
+})
   // 注意：不要在这里设置Content-Type，特别是对于multipart/form-data请求
   // 让axios根据数据类型自动设置
 
@@ -153,16 +155,23 @@ const asyncExport = async () => {
 
 // 下载文件的辅助函数
 const downloadFile = (response, filename) => {
-  const blob = new Blob([response.data], {type: '.xlsx'})
+  // 根据文件扩展名设置正确的MIME类型
+  const fileExtension = filename.split('.').pop().toLowerCase();
+  let mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; // 默认xlsx
+  
+  if (fileExtension === 'csv') {
+    mimeType = 'text/csv;charset=utf-8';
+  }
+  
+  const blob = new Blob([response.data], { type: mimeType })
   let url = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  let downloadName = '结果'
-          a.setAttribute('download', `${downloadName}.xlsx`);
-          document.body.appendChild(a);
-          a.click();
-          url = window.URL.revokeObjectURL(url);
-          document.body.removeChild(a)
+  a.setAttribute('download', filename);
+  document.body.appendChild(a);
+  a.click();
+  url = window.URL.revokeObjectURL(url);
+  document.body.removeChild(a)
 }
 
 // 清空响应时间记录
