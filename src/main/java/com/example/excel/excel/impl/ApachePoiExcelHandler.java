@@ -19,8 +19,10 @@ import java.lang.reflect.InvocationTargetException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Apache POI Excel处理器 - 简化版
@@ -105,9 +107,20 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
                     // 获取行迭代器
                     Iterator<Row> rowIterator = sheet.iterator();
                     
-                    // 跳过表头
-                    if (rowIterator.hasNext()) {
-                        rowIterator.next();
+                    // 如果没有行，直接返回空列表
+                    if (!rowIterator.hasNext()) {
+                        return dataList;
+                    }
+                    
+                    // 读取表头行，建立表头与列索引的映射
+                    Row headerRow = rowIterator.next();
+                    Map<String, Integer> headerMap = new HashMap<>();
+                    for (Cell cell : headerRow) {
+                        String headerName = getCellValueAsString(cell);
+                        if (headerName != null && !headerName.trim().isEmpty()) {
+                            headerMap.put(headerName.trim(), cell.getColumnIndex());
+                            log.debug("表头映射: [{}] -> 列{}", headerName, cell.getColumnIndex());
+                        }
                     }
                     
                     // 遍历数据行
@@ -115,14 +128,32 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
                         Row row = rowIterator.next();
                         T instance = clazz.getDeclaredConstructor().newInstance();
                         
-                        // 遍历字段
-                        for (int i = 0; i < fields.length; i++) {
-                            Cell cell = row.getCell(i);
-                            if (cell != null) {
-                                fields[i].setAccessible(true);
-                                
-                                // 根据字段类型设置值
-                                setFieldValue(fields[i], instance, cell);
+                        // 遍历字段，根据表头映射设置值
+                        for (Field field : fields) {
+                            // 跳过id字段，由后端生成
+                            if ("id".equals(field.getName())) {
+                                continue;
+                            }
+                            
+                            // 查找当前字段在Excel中的列索引
+                            Integer colIndex = headerMap.get(field.getName());
+                            if (colIndex == null) {
+                                // 尝试大小写不敏感匹配
+                                for (Map.Entry<String, Integer> entry : headerMap.entrySet()) {
+                                    if (entry.getKey().equalsIgnoreCase(field.getName())) {
+                                        colIndex = entry.getValue();
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // 如果找到对应的列，设置字段值
+                            if (colIndex != null) {
+                                Cell cell = row.getCell(colIndex);
+                                if (cell != null) {
+                                    field.setAccessible(true);
+                                    setFieldValue(field, instance, cell);
+                                }
                             }
                         }
                         
@@ -159,22 +190,31 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
      */
     private void setFieldValue(Field field, T instance, Cell cell) {
         try {
-            Class<?> fieldType = field.getType();
-            
-            if (String.class.equals(fieldType)) {
-                field.set(instance, getCellValueAsString(cell));
-            } else if (Integer.class.equals(fieldType) || int.class.equals(fieldType)) {
-                field.set(instance, (int) cell.getNumericCellValue());
-            } else if (Long.class.equals(fieldType) || long.class.equals(fieldType)) {
-                field.set(instance, (long) cell.getNumericCellValue());
-            } else if (Double.class.equals(fieldType) || double.class.equals(fieldType)) {
-                field.set(instance, cell.getNumericCellValue());
-            } else if (Boolean.class.equals(fieldType) || boolean.class.equals(fieldType)) {
-                field.set(instance, cell.getBooleanCellValue());
+            String cellValue = getCellValueAsString(cell);
+            if (cellValue == null) {
+                return;
             }
-            // 其他类型可以根据需要添加
+
+            Class<?> fieldType = field.getType();
+            field.setAccessible(true);
+            
+            try {
+                if (String.class.equals(fieldType)) {
+                    field.set(instance, cellValue);
+                } else if (Integer.class.equals(fieldType) || int.class.equals(fieldType)) {
+                    field.set(instance, Integer.parseInt(cellValue));
+                } else if (Long.class.equals(fieldType) || long.class.equals(fieldType)) {
+                    field.set(instance, Long.parseLong(cellValue));
+                } else if (Double.class.equals(fieldType) || double.class.equals(fieldType)) {
+                    field.set(instance, Double.parseDouble(cellValue));
+                } else if (Boolean.class.equals(fieldType) || boolean.class.equals(fieldType)) {
+                    field.set(instance, "1".equals(cellValue) || "true".equalsIgnoreCase(cellValue));
+                }
+            } catch (NumberFormatException e) {
+                log.warn("字段[{}]类型转换失败 (值: '{}')", field.getName(), cellValue);
+            }
         } catch (Exception e) {
-            log.warn("设置字段值失败: {}", field.getName(), e);
+            log.warn("设置字段[{}]值失败: {}", field.getName(), e.getMessage());
         }
     }
     

@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import axios from 'axios'
 
 // 响应时间数据
@@ -8,6 +8,50 @@ const loading = ref(false)
 const file = ref(null)
 const resultMessage = ref('')
 const importType = ref('easyexcel') // 默认为easyexcel
+
+// 导入导出时间统计
+const timeStats = ref({
+  // 导出统计
+  export_easyexcel: { avg: 0, max: 0, min: Infinity, count: 0, total: 0 },
+  export_poi: { avg: 0, max: 0, min: Infinity, count: 0, total: 0 },
+  export_csv: { avg: 0, max: 0, min: Infinity, count: 0, total: 0 },
+  // 导入统计
+  import_easyexcel: { avg: 0, max: 0, min: Infinity, count: 0, total: 0 },
+  import_poi: { avg: 0, max: 0, min: Infinity, count: 0, total: 0 },
+  import_csv: { avg: 0, max: 0, min: Infinity, count: 0, total: 0 }
+})
+
+// 导出统计计算属性
+const exportStats = computed(() => {
+  return Object.entries(timeStats.value)
+    .filter(([type]) => type.startsWith('export_'))
+    .map(([type, stats]) => ({
+      type: type.replace('export_', ''),
+      ...stats
+    }))
+})
+
+// 导入统计计算属性
+const importStats = computed(() => {
+  return Object.entries(timeStats.value)
+    .filter(([type]) => type.startsWith('import_'))
+    .map(([type, stats]) => ({
+      type: type.replace('import_', ''),
+      ...stats
+    }))
+})
+
+// 记录时间的方法
+function recordTime(type, startTime) {
+  const duration = Math.round((Date.now() - startTime) / 1000) // 转为秒
+  const stats = timeStats.value[type]
+  
+  stats.count++
+  stats.total += duration
+  stats.avg = Math.round(stats.total / stats.count)
+  stats.max = Math.max(stats.max, duration)
+  stats.min = Math.min(stats.min, duration)
+}
 
 // 配置axios
 const apiClient = axios.create({
@@ -89,6 +133,9 @@ const handleFileChange = (event) => {
 }
 
 const importExcel = async () => {
+  const startTime = Date.now()
+  const type = `import_${importType.value}` // 构建统计类型
+  
   if (!file.value) {
     resultMessage.value = '请选择文件'
     return
@@ -125,16 +172,17 @@ const importExcel = async () => {
     }
   } finally {
     isUploading.value = false
+    recordTime(type, startTime) // 记录导入时间
   }
 }
 
 // 导出功能 - 统一的导出函数
 const exportData = async (type) => {
+  const startTime = Date.now()
   try {
     let url = '/export';
     let fileName = `export-${type}-${Date.now()}`;
     
-    // 根据类型设置URL和文件名后缀
     if (type === 'poi') {
       url = '/export/apache-poi';
       fileName += '.xlsx';
@@ -151,6 +199,8 @@ const exportData = async (type) => {
     resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出成功`;
   } catch (error) {
     resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出失败: ${error.message}`;
+  } finally {
+    recordTime(type, startTime)
   }
 }
 
@@ -250,6 +300,58 @@ const clearResponseTimes = () => {
     <!-- 结果消息 -->
     <div class="message" v-if="resultMessage">
       {{ resultMessage }}
+    </div>
+
+    <!-- 操作耗时统计 -->
+    <div class="stats-table">
+      <h3>操作耗时统计</h3>
+      <div class="stats-section">
+        <h4>导入操作</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>平均时间(s)</th>
+              <th>最长时间(s)</th>
+              <th>最短时间(s)</th>
+              <th>次数</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="stats in importStats" :key="stats.type">
+              <td>{{ stats.type }}</td>
+              <td>{{ stats.avg }}</td>
+              <td>{{ stats.max }}</td>
+              <td>{{ stats.min === Infinity ? '-' : stats.min }}</td>
+              <td>{{ stats.count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <div class="stats-section">
+        <h4>导出操作</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>平均时间(s)</th>
+              <th>最长时间(s)</th>
+              <th>最短时间(s)</th>
+              <th>次数</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="stats in exportStats" :key="stats.type">
+              <td>{{ stats.type }}</td>
+              <td>{{ stats.avg }}</td>
+              <td>{{ stats.max }}</td>
+              <td>{{ stats.min === Infinity ? '-' : stats.min }}</td>
+              <td>{{ stats.count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     
     <!-- 响应时间记录 -->
@@ -436,6 +538,44 @@ th {
 
 .clear-btn:hover {
   background-color: #d32f2f;
+}
+
+.stats-table {
+  margin-top: 20px;
+  background-color: #f9f9f9;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+.stats-table h3 {
+  margin-top: 0;
+  color: #333;
+}
+
+.stats-section {
+  margin-bottom: 20px;
+}
+
+.stats-section h4 {
+  margin: 10px 0;
+  color: #555;
+}
+
+.stats-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.stats-table th, 
+.stats-table td {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+
+.stats-table th {
+  background-color: #f2f2f2;
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {

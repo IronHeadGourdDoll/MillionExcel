@@ -15,25 +15,25 @@ public class User {
     @ExcelProperty("ID")
     private Long id;
 
-    @ExcelProperty("用户名")
+    @ExcelProperty("username")
     private String username;
 
-    @ExcelProperty("姓名")
+    @ExcelProperty("name")
     private String name;
 
-    @ExcelProperty("邮箱")
+    @ExcelProperty("email")
     private String email;
 
-    @ExcelProperty("手机号")
+    @ExcelProperty("phone")
     private String phone;
 
-    @ExcelProperty("年龄")
+    @ExcelProperty("age")
     private Integer age;
 
-    @ExcelProperty("创建时间")
+    @ExcelProperty("createTime")
     private LocalDateTime createTime;
 
-    @ExcelProperty("更新时间")
+    @ExcelProperty("updateTime")
     private LocalDateTime updateTime;
 
 }
