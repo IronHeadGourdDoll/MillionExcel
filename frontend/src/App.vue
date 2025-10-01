@@ -44,13 +44,15 @@ const importStats = computed(() => {
 // 记录时间的方法
 function recordTime(type, startTime) {
   const duration = Math.round((Date.now() - startTime) / 1000) // 转为秒
-  const stats = timeStats.value[type]
+  const stats = timeStats.value[type] || {}
   
-  stats.count++
-  stats.total += duration
+  stats.count = (stats.count || 0) + 1
+  stats.total = (stats.total || 0) + duration
   stats.avg = Math.round(stats.total / stats.count)
-  stats.max = Math.max(stats.max, duration)
-  stats.min = Math.min(stats.min, duration)
+  stats.max = Math.max(stats.max || 0, duration)
+  stats.min = Math.min(stats.min === undefined ? Infinity : stats.min, duration)
+  
+  timeStats.value[type] = stats
 }
 
 // 配置axios
@@ -181,7 +183,15 @@ const exportData = async (type) => {
   const startTime = Date.now()
   try {
     let url = '/export';
-    let fileName = `export-${type}-${Date.now()}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    let fileName = `export-${type}-${timestamp}`;
+    
+    // 添加时间统计到导出数据
+    const exportStats = {
+      exportTime: timestamp,
+      exportDuration: 0, // 将在完成后更新
+      exportType: type
+    };
     
     if (type === 'poi') {
       url = '/export/apache-poi';
@@ -195,12 +205,18 @@ const exportData = async (type) => {
     }
     
     const response = await sendRequest('get', url);
+    // 计算实际导出耗时
+    exportStats.exportDuration = (Date.now() - startTime) / 1000;
+    
     downloadFile(response, fileName);
-    resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出成功`;
+    resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出成功 (耗时: ${exportStats.exportDuration}s)`;
   } catch (error) {
-    resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出失败: ${error.message}`;
+    console.error('导出错误详情:', error);
+    const errorMsg = error.response?.data?.message || error.message;
+    resultMessage.value = `${type === 'poi' ? 'Apache POI' : type === 'easyexcel' ? 'EasyExcel' : 'CSV'}导出失败: ${errorMsg}`;
+    throw error; // 重新抛出错误以便外部捕获
   } finally {
-    recordTime(type, startTime)
+    recordTime(`export_${type}`, startTime);
   }
 }
 

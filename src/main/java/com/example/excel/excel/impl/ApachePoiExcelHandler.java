@@ -2,12 +2,20 @@ package com.example.excel.excel.impl;
 
 import com.example.excel.excel.ExcelHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.formula.functions.T;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.xml.sax.InputSource;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.XMLReaderFactory;
 import org.springframework.web.multipart.MultipartFile;
+
+import cn.hutool.core.date.StopWatch;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -87,102 +95,39 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
 
     @Override
     public List<T> importExcel(MultipartFile file, Class<T> clazz) {
-        List<T> dataList = new ArrayList<>();
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start();
         
-        try {
-            // 创建临时文件
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("excel-import", ".xlsx");
-            try {
-                // 将上传文件保存到临时文件
-                file.transferTo(tempFile);
-                
-                // 使用安全模式从临时文件加载
-                try (org.apache.poi.ss.usermodel.Workbook workbook = WorkbookFactory.create(tempFile.toFile(), null, true)) {
-                    // 获取第一个sheet
-                    Sheet sheet = workbook.getSheetAt(0);
-                    
-                    // 获取所有字段
-                    Field[] fields = clazz.getDeclaredFields();
-                    
-                    // 获取行迭代器
-                    Iterator<Row> rowIterator = sheet.iterator();
-                    
-                    // 如果没有行，直接返回空列表
-                    if (!rowIterator.hasNext()) {
-                        return dataList;
-                    }
-                    
-                    // 读取表头行，建立表头与列索引的映射
-                    Row headerRow = rowIterator.next();
-                    Map<String, Integer> headerMap = new HashMap<>();
-                    for (Cell cell : headerRow) {
-                        String headerName = getCellValueAsString(cell);
-                        if (headerName != null && !headerName.trim().isEmpty()) {
-                            headerMap.put(headerName.trim(), cell.getColumnIndex());
-                            log.debug("表头映射: [{}] -> 列{}", headerName, cell.getColumnIndex());
-                        }
-                    }
-                    
-                    // 遍历数据行
-                    while (rowIterator.hasNext()) {
-                        Row row = rowIterator.next();
-                        T instance = clazz.getDeclaredConstructor().newInstance();
-                        
-                        // 遍历字段，根据表头映射设置值
-                        for (Field field : fields) {
-                            // 跳过id字段，由后端生成
-                            if ("id".equals(field.getName())) {
-                                continue;
-                            }
-                            
-                            // 查找当前字段在Excel中的列索引
-                            Integer colIndex = headerMap.get(field.getName());
-                            if (colIndex == null) {
-                                // 尝试大小写不敏感匹配
-                                for (Map.Entry<String, Integer> entry : headerMap.entrySet()) {
-                                    if (entry.getKey().equalsIgnoreCase(field.getName())) {
-                                        colIndex = entry.getValue();
-                                        break;
-                                    }
-                                }
-                            }
-                            
-                            // 如果找到对应的列，设置字段值
-                            if (colIndex != null) {
-                                Cell cell = row.getCell(colIndex);
-                                if (cell != null) {
-                                    field.setAccessible(true);
-                                    setFieldValue(field, instance, cell);
-                                }
-                            }
-                        }
-                        
-                        dataList.add(instance);
-                    }
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            } catch (IllegalStateException e) {
-                throw new RuntimeException(e);
-            } catch (SecurityException e) {
-                throw new RuntimeException(e);
-            } catch (InstantiationException e) {
-                throw new RuntimeException(e);
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            } catch (IllegalArgumentException e) {
-                throw new RuntimeException(e);
-            } catch (InvocationTargetException e) {
-                throw new RuntimeException(e);
-            } catch (NoSuchMethodException e) {
-                throw new RuntimeException(e);
+        try (InputStream inputStream = file.getInputStream()) {
+            log.info("开始Apache POI导入Excel文件：{}，大小：{}KB", file.getOriginalFilename(), file.getSize() / 1024);
+            
+            // 检查文件大小
+            long fileSize = inputStream.available();
+            if (fileSize > 100_000_000) {
+                log.warn("处理超大Excel文件(大小: {}MB)，可能需要较长时间", fileSize/1024/1024);
             }
+            
+            // 使用SAX处理器处理大文件
+            ExcelSAXHandler<T> handler = new ExcelSAXHandler<>(clazz);
+            List<T> result = handler.parse(inputStream);
+            
+            stopWatch.stop();
+            log.info("Apache POI导入Excel完成，共导入{}条数据，耗时{}ms", result.size(), stopWatch.getTotalTimeMillis());
+            
+            return result;
+        } catch (org.apache.poi.util.RecordFormatException e) {
+            log.error("Excel文件格式异常，可能是文件损坏或超大文件：{}", e.getMessage());
+            throw new RuntimeException("Excel文件格式异常，可能是文件损坏或超大文件，请尝试使用EasyExcel处理器或分割文件后重试", e);
+        } catch (OutOfMemoryError e) {
+            log.error("Excel导入过程中内存不足", e);
+            throw new RuntimeException("Excel导入过程中内存不足，请尝试使用EasyExcel处理器或增加JVM内存", e);
         } catch (Exception e) {
             log.error("Apache POI导入Excel失败", e);
-            throw new RuntimeException("导入Excel失败", e);
+            throw new RuntimeException("导入Excel失败：" + e.getMessage(), e);
+        } finally {
+            // 强制回收内存
+            System.gc();
         }
-        
-        return dataList;
     }
     
     /**
