@@ -10,9 +10,12 @@ import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -85,9 +88,14 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
         List<T> dataList = new ArrayList<>();
         
         try {
-            try (InputStream inputStream = file.getInputStream()) {
-                // 使用WorkbookFactory创建工作簿
-                try (org.apache.poi.ss.usermodel.Workbook workbook = WorkbookFactory.create(inputStream)) {
+            // 创建临时文件
+            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("excel-import", ".xlsx");
+            try {
+                // 将上传文件保存到临时文件
+                file.transferTo(tempFile);
+                
+                // 使用安全模式从临时文件加载
+                try (org.apache.poi.ss.usermodel.Workbook workbook = WorkbookFactory.create(tempFile.toFile(), null, true)) {
                     // 获取第一个sheet
                     Sheet sheet = workbook.getSheetAt(0);
                     
@@ -121,6 +129,22 @@ public class ApachePoiExcelHandler<T> implements ExcelHandler<T> {
                         dataList.add(instance);
                     }
                 }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            } catch (IllegalStateException e) {
+                throw new RuntimeException(e);
+            } catch (SecurityException e) {
+                throw new RuntimeException(e);
+            } catch (InstantiationException e) {
+                throw new RuntimeException(e);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            } catch (IllegalArgumentException e) {
+                throw new RuntimeException(e);
+            } catch (InvocationTargetException e) {
+                throw new RuntimeException(e);
+            } catch (NoSuchMethodException e) {
+                throw new RuntimeException(e);
             }
         } catch (Exception e) {
             log.error("Apache POI导入Excel失败", e);

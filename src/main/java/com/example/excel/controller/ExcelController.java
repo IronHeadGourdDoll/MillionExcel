@@ -1,5 +1,6 @@
 package com.example.excel.controller;
 
+import cn.hutool.core.date.StopWatch;
 import com.example.excel.entity.User;
 import com.example.excel.excel.ExcelHandler;
 import com.example.excel.excel.ExcelHandlerFactory;
@@ -70,7 +71,7 @@ public class ExcelController {
             }
 
             // 获取用户数据
-            List<User> users = userService.selectPage(1, 1000); // 使用selectPage方法替代list方法
+            List<User> users = userService.list();
 
             // 获取对应的Excel处理器
             ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
@@ -130,8 +131,12 @@ public class ExcelController {
     public void asyncExportExcel(@RequestParam(value = "type", defaultValue = "easyexcel") String type,
                                  HttpServletResponse response) {
         try {
-            // 获取用户数据
-            List<User> users = userService.selectPage(1, 1000); // 使用selectPage方法替代list方法
+            // 获取用户数据 - 优化性能
+            StopWatch stopWatch = new StopWatch();
+            stopWatch.start("query-data");
+            List<User> users = userService.list();
+            stopWatch.stop();
+            log.debug("查询数据耗时: {}ms", stopWatch.getLastTaskTimeMillis());
 
             // 获取Excel处理器
             ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
@@ -251,8 +256,12 @@ public class ExcelController {
             // 获取Excel处理器
             ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
             
-            // 获取第一页数据
-            List<User> users = userService.selectPage(1, pageSize);
+            // 获取数据 - 优化性能
+            StopWatch stopWatch = new StopWatch();
+            stopWatch.start("query-data");
+            List<User> users = userService.list();
+            stopWatch.stop();
+            log.debug("查询数据耗时: {}ms", stopWatch.getLastTaskTimeMillis());
             
             // 设置响应头
             String fileExtension = "csv".equals(type) ? "csv" : "xlsx";

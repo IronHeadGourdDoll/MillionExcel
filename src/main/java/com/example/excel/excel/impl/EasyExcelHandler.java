@@ -1,10 +1,14 @@
 package com.example.excel.excel.impl;
 
 import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.event.AnalysisEventListener;
+import com.alibaba.excel.write.metadata.WriteSheet;
+import com.alibaba.excel.write.style.column.LongestMatchColumnWidthStyleStrategy;
 import com.example.excel.excel.ExcelHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.formula.functions.T;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StopWatch;
 import org.springframework.web.multipart.MultipartFile;
@@ -14,6 +18,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * 统一的Excel处理器实现，使用EasyExcel
@@ -42,10 +49,35 @@ public class EasyExcelHandler<T> implements ExcelHandler<T> {
             response.setHeader("Pragma", "no-cache");
             response.setHeader("Expires", "0");
             
-            // 使用EasyExcel写入数据
-            EasyExcel.write(response.getOutputStream(), clazz)
-                    .sheet("Sheet1")
-                    .doWrite(dataList);
+            try {
+                ExcelWriter excelWriter = EasyExcel.write(response.getOutputStream(), clazz)
+                        .registerWriteHandler(new LongestMatchColumnWidthStyleStrategy())
+                        .autoTrim(true)
+                        .inMemory(false)
+                        .build();
+                
+                WriteSheet writeSheet = EasyExcel.writerSheet("Sheet1")
+                        .build();
+                
+                // 单线程顺序写入，避免多线程安全问题
+                int batchSize = 200000; // 每批处理20万条
+                for (int i = 0; i < dataList.size(); i += batchSize) {
+                    final int start = i;
+                    final int end = Math.min(i + batchSize, dataList.size());
+                    List<T> batch = dataList.subList(start, end);
+                    excelWriter.write(batch, writeSheet);
+                    log.debug("已导出 {} 到 {} 条数据", start, end);
+                }
+                
+                // 刷新并关闭资源
+                excelWriter.finish();
+                response.flushBuffer();
+            } finally {
+                // 确保资源正确关闭
+            }
+
+            // 强制清理临时文件
+            System.gc();
             
             long endTime = System.currentTimeMillis();
             log.info("Excel导出完成，共导出{}条数据，耗时{}ms", dataList.size(), (endTime - startTime));

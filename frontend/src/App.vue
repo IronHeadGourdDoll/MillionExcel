@@ -78,29 +78,55 @@ const sendRequest = async (method, url, dataOrConfig = {}) => {
   }
 }
 
+// 文件上传状态
+const uploadProgress = ref(0)
+const isUploading = ref(false)
+
 // Excel导入功能
-  const handleFileChange = (event) => {
-    file.value = event.target.files[0]
+const handleFileChange = (event) => {
+  file.value = event.target.files[0]
+  uploadProgress.value = 0
+}
+
+const importExcel = async () => {
+  if (!file.value) {
+    resultMessage.value = '请选择文件'
+    return
   }
 
-  const importExcel = async () => {
-    if (!file.value) {
-      resultMessage.value = '请选择文件'
-      return
-    }
-    
+  isUploading.value = true
+  uploadProgress.value = 0
+  resultMessage.value = ''
+
+  try {
     const formData = new FormData()
     formData.append('file', file.value)
-    
-    try {
-      // 注意：当使用FormData时，不要手动设置Content-Type，让axios自动处理
-      // type参数应该作为URL查询参数传递，而不是放在FormData中
-      const response = await apiClient.post(`/import?type=${importType.value}`, formData)
-      resultMessage.value = `导入成功: ${response.data}`
-    } catch (error) {
-      resultMessage.value = `导入失败: ${error.message || error}`
+
+    const response = await apiClient.post(`/import?type=${importType.value}`, formData, {
+      onUploadProgress: progressEvent => {
+        if (progressEvent.total > 0) {
+          uploadProgress.value = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          )
+        }
+      },
+      timeout: 600000 // 10分钟超时
+    })
+
+    resultMessage.value = `导入成功: ${response.data}`
+  } catch (error) {
+    console.error('导入错误详情:', error)
+    if (error.response) {
+      resultMessage.value = `导入失败 (${error.response.status}): ${error.response.data || '服务器错误'}`
+    } else if (error.request) {
+      resultMessage.value = '导入失败: 服务器无响应'
+    } else {
+      resultMessage.value = `导入失败: ${error.message}`
     }
+  } finally {
+    isUploading.value = false
   }
+}
 
 // 导出功能 - 统一的导出函数
 const exportData = async (type) => {
