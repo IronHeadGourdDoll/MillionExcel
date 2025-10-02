@@ -238,7 +238,7 @@ const exportWithCSV = async () => {
 // 异步导出功能
 const asyncExport = async () => {
   try {
-    const response = await sendRequest('get', '/export/async')
+    const response = await sendRequest('get', '/async-export')
     resultMessage.value = `异步导出已开始，任务ID: ${response.data.taskId}，请稍后查看导出结果`
   } catch (error) {
     resultMessage.value = `异步导出失败: ${error.message}`

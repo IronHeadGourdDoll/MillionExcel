@@ -1,7 +1,7 @@
 # 百万级Excel导入导出解决方案
 
 ## 项目简介
-本项目基于Java 17和Spring Boot 3实现了高性能的Excel导入导出功能，能够处理百万级数据量的Excel文件，并将导入导出时间控制在30秒内。项目提供了三种不同的实现方案，可根据实际需求选择合适的方案。
+本项目基于Java 17和Spring Boot 3实现了高性能的Excel导入导出功能，能够处理百万级数据量的Excel文件，并将导入导出时间控制在60秒内。项目提供了三种不同的实现方案，可根据实际需求选择合适的方案。
 
 ## 技术栈
 - Java 17
@@ -28,7 +28,6 @@ src/main/java/com/example/excel/
 │       └── UserServiceImpl.java        # 用户服务实现
 └── excel/                              # Excel处理相关
     ├── ExcelHandler.java               # Excel处理器接口
-    ├── ExcelHandlerFactory.java        # Excel处理器工厂
     └── impl/
         ├── ApachePoiExcelHandler.java  # Apache POI实现
         ├── EasyExcelHandler.java       # EasyExcel实现

@@ -1,18 +1,78 @@
 package com.example.excel.excel;
 
+import com.example.excel.excel.impl.ApachePoiExcelHandler;
+import com.example.excel.excel.impl.CsvExcelHandler;
+import com.example.excel.excel.impl.EasyExcelHandler;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 /**
  * Excel处理接口，定义Excel导入导出的基本操作
- * 简化版：使用默认方法减少实现类中的重复代码
+ * 包含工厂方法和默认实现
  */
 public interface ExcelHandler<T> {
+    /**
+     * Excel处理器类型枚举
+     */
+    enum HandlerType {
+        EASY_EXCEL("easy"),
+        CSV("csv"),
+        APACHE_POI("poi");
+
+        private final String code;
+
+        HandlerType(String code) {
+            this.code = code;
+        }
+
+        public String getCode() {
+            return code;
+        }
+    }
+
+    // 默认实现缓存
+    static final Map<String, ExcelHandler<?>> handlerCache = new ConcurrentHashMap<>();
+    static final EasyExcelHandler<?> DEFAULT_HANDLER = new EasyExcelHandler<>();
+
+    /**
+     * 获取Excel处理器实例
+     * @param type 处理器类型
+     * @param clazz 数据类型
+     * @return Excel处理器实例
+     */
+    @SuppressWarnings("unchecked")
+    static <T> ExcelHandler<T> getInstance(HandlerType type, Class<T> clazz) {
+        String cacheKey = type.getCode() + ":" + clazz.getName();
+        return (ExcelHandler<T>) handlerCache.computeIfAbsent(cacheKey, k -> {
+            switch (type) {
+                case CSV:
+                    return new CsvExcelHandler<>();
+                case APACHE_POI:
+                    return new ApachePoiExcelHandler<>();
+                case EASY_EXCEL:
+                default:
+                    return DEFAULT_HANDLER;
+            }
+        });
+    }
+
+    /**
+     * 获取默认的Excel处理器实例
+     * @param clazz 数据类型
+     * @return 默认的Excel处理器实例
+     */
+    static <T> ExcelHandler<T> getDefaultInstance(Class<T> clazz) {
+        return getInstance(HandlerType.EASY_EXCEL, clazz);
+    }
 
     /**
      * 导出数据到Excel文件
@@ -21,7 +81,7 @@ public interface ExcelHandler<T> {
      * @param filename 文件名
      * @param clazz 数据类型
      */
-    void export(List<T> dataList, HttpServletResponse response, String filename, Class<T> clazz);
+    void export(List<T> dataList, HttpServletResponse response, String filename, Class<T> clazz) throws UnsupportedEncodingException;
 
     /**
      * 从Excel文件导入数据
@@ -66,19 +126,5 @@ public interface ExcelHandler<T> {
                 return new ArrayList<>();
             }
         });
-    }
-
-    /**
-     * 分页导出数据
-     * 默认实现调用普通导出方法
-     * @param pageNum 页码
-     * @param pageSize 每页大小
-     * @param response HTTP响应对象
-     * @param filename 文件名
-     * @param clazz 数据类型
-     */
-    default void exportByPage(int pageNum, int pageSize, HttpServletResponse response, String filename, Class<T> clazz) {
-        // 默认实现：调用普通导出方法，实际分页逻辑由实现类决定
-        export(new ArrayList<>(), response, filename, clazz);
     }
 }

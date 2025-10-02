@@ -1,10 +1,16 @@
 package com.example.excel.controller;
 
 import cn.hutool.core.date.StopWatch;
+import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.ExcelWriter;
+import com.alibaba.excel.write.metadata.WriteSheet;
+import com.alibaba.excel.write.style.column.LongestMatchColumnWidthStyleStrategy;
 import com.example.excel.entity.User;
 import com.example.excel.excel.ExcelHandler;
-import com.example.excel.excel.ExcelHandlerFactory;
 import com.example.excel.service.UserService;
+import jakarta.servlet.ServletOutputStream;
+import jakarta.servlet.WriteListener;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -13,14 +19,26 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.scheduling.annotation.Scheduled;
 
 /**
  * Excel导入导出控制器，提供REST API接口
@@ -31,10 +49,10 @@ import java.util.concurrent.CompletableFuture;
 public class ExcelController {
 
     @Autowired
-    private ExcelHandlerFactory excelHandlerFactory;
+    private UserService userService;
 
     @Autowired
-    private UserService userService;
+    private ExcelHandler excelHandler;
 
     /**
      * 导出数据到Excel - 统一接口
@@ -74,7 +92,12 @@ public class ExcelController {
             List<User> users = userService.list();
 
             // 获取对应的Excel处理器
-            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
+            ExcelHandler<User> excelHandler = ExcelHandler.getInstance(
+                "easyexcel".equals(type) ? ExcelHandler.HandlerType.EASY_EXCEL :
+                "csv".equals(type) ? ExcelHandler.HandlerType.CSV :
+                ExcelHandler.HandlerType.APACHE_POI, 
+                User.class
+            );
 
             // 根据类型设置文件名后缀和内容类型
             String fileExtension = "xlsx";
@@ -125,49 +148,87 @@ public class ExcelController {
      * 异步导出数据到Excel
      *
      * @param type     导出类型：poi, easyexcel, csv
-     * @param response HTTP响应
      */
+    // 临时文件跟踪器
+    private static final Map<String, Long> fileExpiryMap = new ConcurrentHashMap<>();
+    private static final long FILE_EXPIRY_TIME = 3600_000; // 1小时过期
+    
     @GetMapping("/async-export")
-    public void asyncExportExcel(@RequestParam(value = "type", defaultValue = "easyexcel") String type,
-                                 HttpServletResponse response) {
-        try {
-            // 获取用户数据 - 优化性能
-            StopWatch stopWatch = new StopWatch();
-            stopWatch.start("query-data");
-            List<User> users = userService.list();
-            stopWatch.stop();
-            log.debug("查询数据耗时: {}ms", stopWatch.getLastTaskTimeMillis());
-
-            // 获取Excel处理器
-            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
-
-            // 根据类型设置文件名后缀和内容类型
-            String fileExtension = "xlsx";
-            String contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
-            if ("csv".equals(type)) {
-                fileExtension = "csv";
-                contentType = "text/csv; charset=UTF-8";
+    public String asyncExportExcel(@RequestParam(value = "type", defaultValue = "easyexcel") String type) {
+        // 创建临时文件名
+        String fileExtension = "csv".equals(type) ? "csv" : "xlsx";
+        String fileName = "export_" + System.currentTimeMillis() + "." + fileExtension;
+        String filePath = System.getProperty("java.io.tmpdir") + fileName;
+        
+        // 启动异步导出任务
+        CompletableFuture.runAsync(() -> {
+            try {
+                // 获取用户数据
+                List<User> users = userService.list();
+                
+                // 导出到临时文件
+                try (OutputStream outputStream = new FileOutputStream(filePath)) {
+                    ExcelWriter excelWriter = EasyExcel.write(outputStream, User.class)
+                        .registerWriteHandler(new LongestMatchColumnWidthStyleStrategy())
+                        .autoTrim(true)
+                        .build();
+                    
+                    WriteSheet writeSheet = EasyExcel.writerSheet("Sheet1").build();
+                    excelWriter.write(users, writeSheet);
+                    excelWriter.finish();
+                    
+                    // 记录文件过期时间
+                    fileExpiryMap.put(fileName, System.currentTimeMillis() + FILE_EXPIRY_TIME);
+                    log.info("异步导出成功，文件已保存: {}", filePath);
+                }
+            } catch (Exception e) {
+                log.error("异步导出失败", e);
+                try {
+                    Files.deleteIfExists(Paths.get(filePath));
+                } catch (IOException ioException) {
+                    log.error("删除临时文件失败", ioException);
+                }
             }
+        });
+        
+        // 立即返回下载URL
+        return "/api/excel/download/" + fileName;
+    }
 
+    
+    @GetMapping("/download/{fileName}")
+    public void downloadExportFile(@PathVariable String fileName, HttpServletResponse response) {
+        String filePath = System.getProperty("java.io.tmpdir") + fileName;
+        
+        try {
+            Path path = Paths.get(filePath);
+            if (!Files.exists(path)) {
+                response.sendError(HttpServletResponse.SC_NOT_FOUND, "文件不存在或已过期");
+                return;
+            }
+            
             // 设置响应头
-            response.setContentType(contentType);
-            response.setCharacterEncoding(StandardCharsets.UTF_8.toString());
+            response.setContentType(Files.probeContentType(path));
+            response.setHeader("Content-Disposition", "attachment; filename=" + fileName);
             response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
             response.setHeader("Pragma", "no-cache");
             response.setHeader("Expires", "0");
-
-            final String s = fileExtension;
-            // 执行异步导出
-            CompletableFuture.runAsync(() -> {
-                try {
-                    excelHandler.export(users, response, "用户数据_异步_" + System.currentTimeMillis() + "." + s, User.class);
-                } catch (Exception e) {
-                    log.error("异步导出Excel执行失败", e);
-                }
-            });
             
-            log.info("异步导出Excel任务已提交");
+            // 传输文件
+            Files.copy(path, response.getOutputStream());
+            response.flushBuffer();
+            
+            // 下载完成后删除文件
+            Files.deleteIfExists(path);
+            fileExpiryMap.remove(fileName);
+            log.info("文件下载完成并已删除: {}", filePath);
+        } catch (IOException e) {
+            log.error("文件下载失败", e);
+            try {
+                response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "文件下载失败");
+            } catch (IOException ioException) {
+                log.error("发送错误响应失败", ioException);
+            }
         } catch (Exception e) {
             log.error("异步导出Excel失败", e);
             try {
@@ -196,7 +257,12 @@ public class ExcelController {
             }
 
             // 获取对应的Excel处理器
-            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
+            ExcelHandler<User> excelHandler = ExcelHandler.getInstance(
+                "easyexcel".equals(type) ? ExcelHandler.HandlerType.EASY_EXCEL :
+                "csv".equals(type) ? ExcelHandler.HandlerType.CSV :
+                ExcelHandler.HandlerType.APACHE_POI, 
+                User.class
+            );
 
             // 执行导入
             List<User> users = excelHandler.importExcel(file, User.class);
@@ -227,10 +293,6 @@ public class ExcelController {
             if (file.isEmpty()) {
                 return "上传的文件为空";
             }
-
-            // 获取对应的Excel处理器
-            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
-
             // 执行异步导入
             excelHandler.asyncImportExcel(file, User.class);
 
@@ -253,8 +315,13 @@ public class ExcelController {
                              @RequestParam(value = "pageSize", defaultValue = "10000") int pageSize,
                              HttpServletResponse response) {
         try {
-            // 获取Excel处理器
-            ExcelHandler<User> excelHandler = excelHandlerFactory.getExcelHandler(type, User.class);
+            // 获取对应的Excel处理器
+            ExcelHandler<User> excelHandler = ExcelHandler.getInstance(
+                "easyexcel".equals(type) ? ExcelHandler.HandlerType.EASY_EXCEL :
+                "csv".equals(type) ? ExcelHandler.HandlerType.CSV :
+                ExcelHandler.HandlerType.APACHE_POI, 
+                User.class
+            );
             
             // 获取数据 - 优化性能
             StopWatch stopWatch = new StopWatch();
@@ -319,6 +386,25 @@ public class ExcelController {
      * @param count 用户数量
      * @return 模拟用户列表
      */
+    // 定时清理过期文件
+    @Scheduled(fixedRate = 3600_000) // 每小时清理一次
+    public void cleanExpiredFiles() {
+        long currentTime = System.currentTimeMillis();
+        fileExpiryMap.entrySet().removeIf(entry -> {
+            if (entry.getValue() < currentTime) {
+                try {
+                    Files.deleteIfExists(Paths.get(System.getProperty("java.io.tmpdir") + entry.getKey()));
+                    log.info("已清理过期文件: {}", entry.getKey());
+                    return true;
+                } catch (IOException e) {
+                    log.error("清理过期文件失败: {}", entry.getKey(), e);
+                    return false;
+                }
+            }
+            return false;
+        });
+    }
+
     private List<User> createMockUsers(int count) {
         List<User> users = new ArrayList<>();
         for (int i = 0; i < count; i++) {

@@ -12,7 +12,9 @@ import java.lang.reflect.Field;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * CSV Excel处理器 - 简化版
@@ -97,8 +99,17 @@ public class CsvExcelHandler<T> implements ExcelHandler<T> {
                     return dataList;
                 }
                 
+                // 解析表头列
+                String[] headers = parseCSVLine(headerLine);
+                
                 // 获取所有字段
                 Field[] fields = clazz.getDeclaredFields();
+                
+                // 创建字段索引映射
+                Map<String, Integer> fieldIndexMap = new HashMap<>();
+                for (int i = 0; i < headers.length; i++) {
+                    fieldIndexMap.put(headers[i].trim(), i);
+                }
                 
                 // 读取数据行
                 String line;
@@ -114,11 +125,15 @@ public class CsvExcelHandler<T> implements ExcelHandler<T> {
                     // 创建对象实例
                     T instance = clazz.getDeclaredConstructor().newInstance();
                     
-                    // 设置字段值
-                    for (int i = 0; i < Math.min(fields.length, values.length); i++) {
-                        if (values[i] != null && !values[i].isEmpty()) {
-                            fields[i].setAccessible(true);
-                            setFieldValue(fields[i], instance, values[i]);
+                    // 设置字段值 - 根据字段名匹配CSV列
+                    for (Field field : fields) {
+                        String fieldName = field.getName();
+                        if (fieldIndexMap.containsKey(fieldName)) {
+                            int colIndex = fieldIndexMap.get(fieldName);
+                            if (colIndex < values.length && values[colIndex] != null && !values[colIndex].isEmpty()) {
+                                field.setAccessible(true);
+                                setFieldValue(field, instance, values[colIndex]);
+                            }
                         }
                     }
                     
